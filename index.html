@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Rolling Ball 3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #87CEEB; touch-action: none; font-family: sans-serif; }
+    #ui { position: absolute; top: 16px; left: 16px; color: #fff; font-size: 20px; font-weight: bold; text-shadow: 1px 1px 3px #000; }
+    #game-over { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #fff; font-size: 24px; text-shadow: 2px 2px 4px #000; }
+    button { padding: 10px 20px; font-size: 18px; border: none; border-radius: 8px; background: #ff4757; color: #fff; cursor: pointer; margin-top: 10px; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div id="ui">Счет: <span id="score">0</span></div>
+  <div id="game-over">
+    <div>ПРОИГРЫШ</div>
+    <button onclick="restart()">Заново</button>
+  </div>
+
+  <script>
+    let scene, camera, renderer, ball;
+    let speed = 0.4;
+    let ballTargetX = 0;
+    let score = 0;
+    let isGameOver = false;
+    const obstacles = [];
+    const coins = [];
+    const trackWidth = 7;
+
+    function init() {
+      scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0x87ceeb, 20, 90);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+      scene.add(hemiLight);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(10, 20, 10);
+      scene.add(dirLight);
+
+      // Дорожка
+      const trackGeo = new THREE.BoxGeometry(trackWidth, 0.5, 300);
+      const trackMat = new THREE.MeshLambertMaterial({ color: 0x2ed573 });
+      const track = new THREE.Mesh(trackGeo, trackMat);
+      track.position.set(0, -0.25, -130);
+      scene.add(track);
+
+      // Шар игрока
+      const ballGeo = new THREE.SphereGeometry(0.6, 32, 32);
+      const ballMat = new THREE.MeshStandardMaterial({ color: 0xff4757, metalness: 0.2, roughness: 0.5 });
+      ball = new THREE.Mesh(ballGeo, ballMat);
+      ball.position.set(0, 0.6, 0);
+      scene.add(ball);
+
+      // Генерация препятствий и монет вдоль пути
+      for (let z = -20; z > -260; z -= 15) {
+        // Препятствие (блок)
+        const obsGeo = new THREE.BoxGeometry(2, 1.2, 1);
+        const obsMat = new THREE.MeshStandardMaterial({ color: 0x2f3542 });
+        const obs = new THREE.Mesh(obsGeo, obsMat);
+        const posX = (Math.random() - 0.5) * (trackWidth - 2.5);
+        obs.position.set(posX, 0.6, z);
+        scene.add(obs);
+        obstacles.push(obs);
+
+        // Монета
+        const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16);
+        const coinMat = new THREE.MeshStandardMaterial({ color: 0xffa502, metalness: 0.8, roughness: 0.2 });
+        const coin = new THREE.Mesh(coinGeo, coinMat);
+        coin.rotation.x = Math.PI / 2;
+        coin.position.set(-posX * 0.8, 0.6, z - 7);
+        scene.add(coin);
+        coins.push(coin);
+      }
+
+      // Сенсорное управление для мобильного экрана
+      let touchStartX = 0;
+      window.addEventListener('touchstart', (e) => {
+        touchStartX = e.touches[0].clientX;
+      }, { passive: true });
+
+      window.addEventListener('touchmove', (e) => {
+        const deltaX = (e.touches[0].clientX - touchStartX) * 0.015;
+        ballTargetX = Math.max(-trackWidth / 2 + 0.6, Math.min(trackWidth / 2 - 0.6, ballTargetX + deltaX));
+        touchStartX = e.touches[0].clientX;
+      }, { passive: true });
+
+      // Управление стрелками на клавиатуре для тестов на ПК
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') ballTargetX = Math.max(-trackWidth / 2 + 0.6, ballTargetX - 1);
+        if (e.key === 'ArrowRight') ballTargetX = Math.min(trackWidth / 2 - 0.6, ballTargetX + 1);
+      });
+
+      window.addEventListener('resize', onWindowResize);
+      animate();
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      if (!isGameOver) {
+        requestAnimationFrame(animate);
+
+        // Движение вперед и вращение шара
+        ball.position.z -= speed;
+        ball.position.x += (ballTargetX - ball.position.x) * 0.2;
+        ball.rotation.x -= speed / 0.6;
+
+        // Следование камеры
+        camera.position.set(ball.position.x * 0.5, ball.position.y + 3.5, ball.position.z + 7);
+        camera.lookAt(ball.position.x * 0.3, ball.position.y + 0.5, ball.position.z - 5);
+
+        // Вращение монет и подбор
+        for (let i = coins.length - 1; i >= 0; i--) {
+          const coin = coins[i];
+          coin.rotation.z += 0.05;
+          if (ball.position.distanceTo(coin.position) < 0.9) {
+            scene.remove(coin);
+            coins.splice(i, 1);
+            score += 10;
+            document.getElementById('score').innerText = score;
+          }
+        }
+
+        // Проверка столкновения с блоками
+        for (const obs of obstacles) {
+          if (Math.abs(ball.position.z - obs.position.z) < 1.0 &&
+              Math.abs(ball.position.x - obs.position.x) < 1.3) {
+            endGame();
+            break;
+          }
+        }
+
+        // Падение с трассы
+        if (Math.abs(ball.position.x) > trackWidth / 2) {
+          ball.position.y -= 0.2;
+          if (ball.position.y < -5) endGame();
+        }
+      }
+      renderer.render(scene, camera);
+    }
+
+    function endGame() {
+      isGameOver = true;
+      document.getElementById('game-over').style.display = 'block';
+    }
+
+    function restart() {
+      location.reload();
+    }
+
+    init();
+  </script>
+</body>
+</html>
